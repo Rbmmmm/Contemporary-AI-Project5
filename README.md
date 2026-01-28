@@ -75,11 +75,13 @@ EmotionMemeCLIP/
 
 ### 训练模型
 
-直接运行：
+在工作目录下直接运行：
 
 ```bash
 python main.py
 ```
+
+如果是在邮箱下载的代码，会放在 `code/` 文件夹下，此时请把 `code/` 当作工作目录，并把 `data/` 放到 `code/` 文件夹下，或者在 `configs.py` 里修改数据的路径。
 
 默认行为训练并测试配置最优的模型。
 
@@ -115,6 +117,18 @@ cfg.contrastive_weight = 0.2
 * Early Fusion vs Late Fusion
 * 单模态 vs 多模态建模
 * 是否引入监督式对比学习
+
+### vlm 增强实验
+
+由于该实验涉及 VLM（Vision-Language Model）增强的数据处理流程，相关数据体积较大，未直接纳入 Git 仓库进行版本管理。
+
+如需完整复现实验结果，请前往以下 Release 页面下载对应的 data/ 数据目录：
+
+```
+https://github.com/Rbmmmm/Contemporary-AI-Project5/releases/tag/v1.0-data
+```
+
+下载并解压后，请将 `data/` 文件夹放置于项目根目录下，再修改 `configs.py` 里的 `cfg.text_encoder_type` 为 `"sentence_transformer"` 运行即可。
 
 ## 五、说明
 
