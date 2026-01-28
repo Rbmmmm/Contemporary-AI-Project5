@@ -55,16 +55,11 @@ def main(cfg, exp_name=None):
             num_workers=0,
         )
 
-        if cfg.model_type == "baseline":
-            from baseline_model import SimpleFusionBaseline
-            model = SimpleFusionBaseline.load_from_checkpoint(
-                cfg.model_path, cfg=cfg
-            )
-        else:
-            from EmotionCLIP import EmotionCLIP
-            model = EmotionCLIP.load_from_checkpoint(
-                cfg.model_path, cfg=cfg
-            )
+
+        from EmotionCLIP import EmotionCLIP
+        model = EmotionCLIP.load_from_checkpoint(
+            cfg.model_path, cfg=cfg
+        )
 
         # ⚠️ test 必须用新的 Trainer
         test_trainer = Trainer(
@@ -156,12 +151,9 @@ def main(cfg, exp_name=None):
     # ----------------------------
     # Model
     # ----------------------------
-    if cfg.model_type == "baseline":
-        from baseline_model import create_baseline_model
-        model = create_baseline_model(cfg)
-    else:
-        from EmotionCLIP import create_model
-        model = create_model(cfg)
+
+    from EmotionCLIP import create_model
+    model = create_model(cfg)
 
     logger = CSVLogger(save_dir=exp_dir, name="", version="")
 
@@ -214,16 +206,10 @@ def main(cfg, exp_name=None):
     best_ckpt = checkpoint_callback.best_model_path
     print(f">>> Best checkpoint: {best_ckpt}")
 
-    if cfg.model_type == "baseline":
-        from baseline_model import SimpleFusionBaseline
-        best_model = SimpleFusionBaseline.load_from_checkpoint(
+    from EmotionCLIP import EmotionCLIP
+    best_model = EmotionCLIP.load_from_checkpoint(
             best_ckpt, cfg=cfg
-        )
-    else:
-        from EmotionCLIP import EmotionCLIP
-        best_model = EmotionCLIP.load_from_checkpoint(
-            best_ckpt, cfg=cfg
-        )
+    )
 
     # ----------------------------
     # Validation analysis
