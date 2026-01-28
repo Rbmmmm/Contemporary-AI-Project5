@@ -8,6 +8,7 @@ results/
 *.tar.gz
 *.rar
 *.7z
+vlm_cache_exp5.json
 
 ############################
 # 实验生成文件（可选，根据需要）

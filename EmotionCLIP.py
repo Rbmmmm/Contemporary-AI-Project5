@@ -230,46 +230,103 @@ class EmotionCLIP(pl.LightningModule):
     #     return {"logits": logits, "preds": preds}
 
     def forward(self, image_features, text_features, labels=None):
+        # -------------------------------------------------
+        # Encode image / text
+        # -------------------------------------------------
         v_z, t_z = self._encode(image_features, text_features)
-        z_cls = self._fuse(v_z, t_z)
 
-        # contrastive loss
+        # -------------------------------------------------
+        # Contrastive loss (unchanged)
+        # -------------------------------------------------
         if self.cfg.use_contrastive:
             loss_con = nt_xent_loss(v_z, t_z, self.cfg.temperature)
         else:
             loss_con = torch.tensor(0.0, device=self.device)
 
-        # ----------------------------
-        # Train / Val
-        # ----------------------------
+        # =================================================
+        # ================ TRAIN / VAL ====================
+        # =================================================
         if labels is not None:
-            if self.cfg.classifier_type == "prototype":
-                batch_proto = self._build_prototypes(v_z, t_z, labels)
-                logits = z_cls @ batch_proto.T
-            else:
-                logits = self.classifier(z_cls)
 
+            # -------- Fusion strategy switch --------
+            if self.cfg.fusion_strategy == "early":
+                # ===== Early Fusion (feature-level) =====
+                z_cls = self._fuse(v_z, t_z)
+
+                if self.cfg.classifier_type == "prototype":
+                    batch_proto = self._build_prototypes(v_z, t_z, labels)
+                    logits = z_cls @ batch_proto.T
+                else:
+                    logits = self.classifier(z_cls)
+
+            elif self.cfg.fusion_strategy == "late":
+                # ===== Late Fusion (decision-level) =====
+                if self.cfg.classifier_type == "prototype":
+                    # modality-specific logits
+                    proto_img = self._build_prototypes(v_z, t_z, labels)
+                    proto_txt = proto_img  # 训练阶段共享 batch prototype（简洁 & 稳定）
+
+                    logits_img = v_z @ proto_img.T
+                    logits_txt = t_z @ proto_txt.T
+                else:
+                    logits_img = self.classifier(v_z)
+                    logits_txt = self.classifier(t_z)
+
+                alpha = self.cfg.fusion_alpha
+                logits = alpha * logits_img + (1.0 - alpha) * logits_txt
+
+            else:
+                raise ValueError(f"Unknown fusion_strategy: {self.cfg.fusion_strategy}")
+
+            # -------- Loss & prediction --------
             loss_cls = self.ce_loss(logits, labels)
             loss = loss_cls + self.cfg.contrastive_weight * loss_con
             preds = logits.argmax(dim=1)
 
             return {"logits": logits, "preds": preds, "loss": loss}
 
-        # ----------------------------
-        # Test
-        # ----------------------------
+        # =================================================
+        # =================== TEST ========================
+        # =================================================
         if self.cfg.classifier_type == "prototype":
             if not bool(self._prototype_initialized.item()):
                 raise RuntimeError(
                     "Prototype classifier selected but prototypes "
                     "are not initialized in checkpoint."
                 )
-            logits = z_cls @ F.normalize(self.class_prototypes, dim=-1).T
+
+            proto = F.normalize(self.class_prototypes, dim=-1)
+
+            if self.cfg.fusion_strategy == "early":
+                z_cls = self._fuse(v_z, t_z)
+                logits = z_cls @ proto.T
+
+            elif self.cfg.fusion_strategy == "late":
+                logits_img = v_z @ proto.T
+                logits_txt = t_z @ proto.T
+                alpha = self.cfg.fusion_alpha
+                logits = alpha * logits_img + (1.0 - alpha) * logits_txt
+
+            else:
+                raise ValueError(f"Unknown fusion_strategy: {self.cfg.fusion_strategy}")
+
         else:
-            logits = self.classifier(z_cls)
+            if self.cfg.fusion_strategy == "early":
+                z_cls = self._fuse(v_z, t_z)
+                logits = self.classifier(z_cls)
+
+            elif self.cfg.fusion_strategy == "late":
+                logits_img = self.classifier(v_z)
+                logits_txt = self.classifier(t_z)
+                alpha = self.cfg.fusion_alpha
+                logits = alpha * logits_img + (1.0 - alpha) * logits_txt
+
+            else:
+                raise ValueError(f"Unknown fusion_strategy: {self.cfg.fusion_strategy}")
 
         preds = logits.argmax(dim=1)
         return {"logits": logits, "preds": preds}
+
 
     # ========================================================
     # Training
