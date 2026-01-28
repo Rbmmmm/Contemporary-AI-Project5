@@ -13,7 +13,6 @@ from pytorch_lightning.loggers import CSVLogger
 from datasets import Custom_Collator, load_dataset
 from configs import cfg
 
-# 🔑 实验记录与评估工具
 from utils import (
     save_metrics,
     plot_training_curves,
@@ -34,7 +33,7 @@ def main(cfg, exp_name=None):
     seed_everything(cfg.seed, workers=True)
 
     # ========================================================
-    # TEST ONLY MODE
+    # TEST ONLY MODE (checkpoint-safe)
     # ========================================================
     if cfg.test_only:
         print("=" * 60)
@@ -46,15 +45,14 @@ def main(cfg, exp_name=None):
 
         os.makedirs(cfg.test_dir, exist_ok=True)
 
-        dataset_test = load_dataset(cfg, split="test")
+        # ⚠️ 为稳定性，test-only 强制 num_workers = 0
         collator = Custom_Collator(cfg)
-
         test_loader = DataLoader(
-            dataset_test,
+            load_dataset(cfg, split="test"),
             batch_size=cfg.batch_size,
             shuffle=False,
             collate_fn=collator,
-            num_workers=cfg.num_workers,
+            num_workers=0,
         )
 
         if cfg.model_type == "baseline":
@@ -68,13 +66,14 @@ def main(cfg, exp_name=None):
                 cfg.model_path, cfg=cfg
             )
 
-        trainer = Trainer(
+        # ⚠️ test 必须用新的 Trainer
+        test_trainer = Trainer(
             accelerator="gpu",
             devices=cfg.gpus,
             logger=False,
         )
 
-        trainer.test(model, dataloaders=test_loader)
+        test_trainer.test(model, dataloaders=test_loader)
         print(">>> TEST ONLY FINISHED")
         return
 
@@ -126,6 +125,7 @@ def main(cfg, exp_name=None):
 
     # ----------------------------
     # Dataset & Dataloader
+    # ⚠️ 强烈建议 num_workers = 0（CLIP 在 collator 里跑 GPU）
     # ----------------------------
     collator = Custom_Collator(cfg)
 
@@ -134,7 +134,7 @@ def main(cfg, exp_name=None):
         batch_size=cfg.batch_size,
         shuffle=True,
         collate_fn=collator,
-        num_workers=cfg.num_workers,
+        num_workers=0,
     )
 
     val_loader = DataLoader(
@@ -142,7 +142,7 @@ def main(cfg, exp_name=None):
         batch_size=cfg.batch_size,
         shuffle=False,
         collate_fn=collator,
-        num_workers=cfg.num_workers,
+        num_workers=0,
     )
 
     test_loader = DataLoader(
@@ -150,7 +150,7 @@ def main(cfg, exp_name=None):
         batch_size=cfg.batch_size,
         shuffle=False,
         collate_fn=collator,
-        num_workers=cfg.num_workers,
+        num_workers=0,
     )
 
     # ----------------------------
@@ -174,7 +174,6 @@ def main(cfg, exp_name=None):
         save_last=True,
     )
 
-
     trainer = Trainer(
         accelerator="gpu",
         devices=cfg.gpus,
@@ -189,9 +188,9 @@ def main(cfg, exp_name=None):
     print(">>> Training")
     trainer.fit(model, train_loader, val_loader)
 
-    # ========================================================
-    # 保存训练过程指标与曲线
-    # ========================================================
+    # ----------------------------
+    # Save metrics & curves
+    # ----------------------------
     print(">>> Saving metrics and plots")
 
     metrics = {
@@ -210,29 +209,29 @@ def main(cfg, exp_name=None):
     )
 
     # ----------------------------
-    # Reload best model
+    # Reload BEST checkpoint (with prototypes)
     # ----------------------------
     best_ckpt = checkpoint_callback.best_model_path
     print(f">>> Best checkpoint: {best_ckpt}")
 
     if cfg.model_type == "baseline":
         from baseline_model import SimpleFusionBaseline
-        model = SimpleFusionBaseline.load_from_checkpoint(
+        best_model = SimpleFusionBaseline.load_from_checkpoint(
             best_ckpt, cfg=cfg
         )
     else:
         from EmotionCLIP import EmotionCLIP
-        model = EmotionCLIP.load_from_checkpoint(
+        best_model = EmotionCLIP.load_from_checkpoint(
             best_ckpt, cfg=cfg
         )
 
-    # ========================================================
-    # Validation analysis (confusion matrix + bad cases)
-    # ========================================================
+    # ----------------------------
+    # Validation analysis
+    # ----------------------------
     print(">>> Running validation analysis with best model")
 
     evaluate_on_validation(
-        model=model,
+        model=best_model,
         val_loader=val_loader,
         device=cfg.device,
         class_names=cfg.class_names,
@@ -240,10 +239,16 @@ def main(cfg, exp_name=None):
     )
 
     # ----------------------------
-    # Test (only for submission file)
+    # Test (NEW Trainer, checkpoint-safe)
     # ----------------------------
     print(">>> Testing")
-    trainer.test(model, dataloaders=test_loader)
+
+    test_trainer = Trainer(
+        accelerator="gpu",
+        devices=cfg.gpus,
+        logger=False,
+    )
+    test_trainer.test(best_model, dataloaders=test_loader)
 
     print("=" * 60)
     print(f"Experiment finished: {exp_name}")
